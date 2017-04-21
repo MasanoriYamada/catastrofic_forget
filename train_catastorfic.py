@@ -36,9 +36,9 @@ def main():
     parser = argparse.ArgumentParser(description='catastorphic forgetting')
     parser.add_argument('--batchsize', '-b', type=int, default=100,
                         help='Number of images in each mini-batch')
-    parser.add_argument('--epoch', '-e', type=int, default=20,
+    parser.add_argument('--epoch', '-e', type=int, default=1,
                         help='Number of sweeps over the dataset to train')
-    parser.add_argument('--unit', '-u', type=int, default=1000,
+    parser.add_argument('--unit', '-u', type=int, default=6,
                         help='Number of units')
     parser.add_argument('--out', '-o', default='result',
                         help='Directory to output the result')
@@ -47,7 +47,7 @@ def main():
     args = parser.parse_args()
 
     # model and optimizer
-    model = L.Classifier(net.Net(args.unit, 10),lossfun = F.softmax_cross_entropy)
+    model = net.EWC_loss(net.Net(args.unit, 10), 0.0)
     opt = chainer.optimizers.Adam()
     opt.setup(model)
     if args.gpu >= 0:
@@ -73,9 +73,31 @@ def main():
             ['main/accuracy', 'validation/main/accuracy'],
             'epoch', file_name='accuracy.png'))
     trainer.extend(extensions.ProgressBar())
-
-    # Run the training
     trainer.run()
+
+    # set param next task
+    model.set_star_weights_dict()
+    # on EWC
+    model.lam = 1.0
+    # 2nd task
+    train_iter2 = chainer.iterators.SerialIterator(train1, args.batchsize)
+    test_iter2 = chainer.iterators.SerialIterator(test1, args.batchsize, repeat=False, shuffle=False)
+    updater2 = training.StandardUpdater(train_iter2, opt, device=args.gpu)
+    trainer2 = training.Trainer(updater2, (args.epoch, 'epoch'), out=args.out)
+    trainer2.extend(extensions.Evaluator(test_iter2, model, device=args.gpu))
+    # Save two plot images to the result dir
+    if extensions.PlotReport.available():
+        trainer2.extend(
+            extensions.PlotReport(['main/loss', 'validation/main/loss'],
+                                  'epoch', file_name='loss.png'))
+    trainer2.extend(
+        extensions.PlotReport(
+            ['main/accuracy', 'validation/main/accuracy'],
+            'epoch', file_name='accuracy.png'))
+    trainer2.extend(extensions.ProgressBar())
+    trainer2.run()
+
+
 
 
 if __name__ == '__main__':
