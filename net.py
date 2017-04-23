@@ -42,13 +42,14 @@ class EWC_loss(chainer.Chain):
             return vanilla_loss
 
         fisher = self.get_fisher(x)
-        ewc_loss = 0.0
+        self.ewc_loss = 0.0
+        self.regularize_term = 0.0
         for key in self.param_dict:
             diff_sq = (self.param_dict[key] - self.star_param_dict[key])**2
-            regularize_term = F.matmul(fisher[key] ,diff_sq,transb=True)
-            ewc_loss += vanilla_loss + self.lam / 2.0 * F.sum(regularize_term)
-        chainer.report({'loss': ewc_loss, 'accuracy': accuracy}, self)
-        return ewc_loss
+            self.regularize_term += F.sum(F.matmul(fisher[key] ,diff_sq,transa=True))
+        self.ewc_loss = vanilla_loss + self.lam / 2.0 * self.regularize_term
+        chainer.report({'loss': self.ewc_loss, 'accuracy': accuracy}, self)
+        return self.ewc_loss
 
     def get_weights_dict(self):
         # Todo automatic get
@@ -58,22 +59,22 @@ class EWC_loss(chainer.Chain):
         self.param_dict['b2'] = self.predictor.l2.b
 
     def init_weights_grad(self):
-        self.predictor.l1.W.grad = np.ones(self.predictor.l1.W.data.shape, dtype=np.float32)
-        self.predictor.l1.b.grad = np.ones(self.predictor.l1.b.data.shape, dtype=np.float32)
-        self.predictor.l2.W.grad = np.ones(self.predictor.l2.W.data.shape, dtype=np.float32)
-        self.predictor.l2.b.grad = np.ones(self.predictor.l2.b.data.shape, dtype=np.float32)
+        self.predictor.l1.W.zerograd()
+        self.predictor.l1.b.zerograd()
+        self.predictor.l2.W.zerograd()
+        self.predictor.l2.b.zerograd()
 
     def set_star_weights_dict(self):
         self.star_param_dict = copy.deepcopy(self.param_dict)
 
     def get_fisher(self, x):
-        sampling = 1000
+        sampling = 2
         del_param_log_x = []
         for id in range(sampling):
             x_ind = np.random.randint(x.shape[0])
             log_prob = self.predictor(x[x_ind].reshape(1,-1))
-            log_prob.zerograd()
-            self.init_weights_grad() # need init grad
+            log_prob.zerograd() # need init grad for multi dimensional back prop
+            self.init_weights_grad() # need init grad for multi dimensional back prop
             log_prob.backward()
             self.get_weights_dict()
             del_param_log = {}

@@ -7,7 +7,7 @@ from copy import deepcopy
 from matplotlib import pyplot as plt
 
 import net
-
+import util
 
 import chainer
 import chainer.functions as F
@@ -22,15 +22,11 @@ def mnist_imshow(img):
     plt.axis('off')
 
 # return a new mnist dataset w/ pixels randomly permuted
-def permute_mnist(mnist):
-    perm_inds = range(mnist.train.images.shape[1])
-    np.random.shuffle(perm_inds)
-    mnist2 = deepcopy(mnist)
-    sets = ["train", "validation", "test"]
-    for set_name in sets:
-        this_set = getattr(mnist2, set_name) # shallow copy
-        this_set._images = np.transpose(np.array([this_set.images[:,c] for c in perm_inds]))
-    return mnist2
+def permute_mnist(tuple_dataset):
+    tuple_dataset2 = deepcopy(tuple_dataset)
+    for data in tuple_dataset2:
+        np.random.shuffle(data[0])
+    return tuple_dataset2
 
 def main():
     parser = argparse.ArgumentParser(description='catastorphic forgetting')
@@ -38,7 +34,7 @@ def main():
                         help='Number of images in each mini-batch')
     parser.add_argument('--epoch', '-e', type=int, default=1,
                         help='Number of sweeps over the dataset to train')
-    parser.add_argument('--unit', '-u', type=int, default=6,
+    parser.add_argument('--unit', '-u', type=int, default=50,
                         help='Number of units')
     parser.add_argument('--out', '-o', default='result',
                         help='Directory to output the result')
@@ -48,7 +44,7 @@ def main():
 
     # model and optimizer
     model = net.EWC_loss(net.Net(args.unit, 10), 0.0)
-    opt = chainer.optimizers.Adam()
+    opt = chainer.optimizers.SGD(lr=0.1)
     opt.setup(model)
     if args.gpu >= 0:
         chainer.cuda.get_device(args.gpu).use()  # Make a specified GPU current
@@ -59,6 +55,9 @@ def main():
     train_iter1 = chainer.iterators.SerialIterator(train1, args.batchsize)
     test_iter1 = chainer.iterators.SerialIterator(test1, args.batchsize, repeat=False, shuffle=False)
 
+    # 1st task
+    # on EWC
+    model.lam = 0.0
     # Set up a trainer
     updater = training.StandardUpdater(train_iter1, opt, device=args.gpu)
     trainer = training.Trainer(updater, (args.epoch, 'epoch'), out=args.out)
@@ -67,33 +66,36 @@ def main():
     if extensions.PlotReport.available():
         trainer.extend(
             extensions.PlotReport(['main/loss', 'validation/main/loss'],
-                                  'epoch', file_name='loss.png'))
-    trainer.extend(
-        extensions.PlotReport(
-            ['main/accuracy', 'validation/main/accuracy'],
-            'epoch', file_name='accuracy.png'))
-    trainer.extend(extensions.ProgressBar())
+                                  'epoch', file_name='lossA.png'))
+        trainer.extend(
+            extensions.PlotReport(
+                ['main/accuracy', 'validation/main/accuracy'],
+                'epoch', file_name='accuracyA.png'))
+        trainer.extend(extensions.ProgressBar())
     trainer.run()
 
+    # 2nd task
     # set param next task
     model.set_star_weights_dict()
     # on EWC
-    model.lam = 1.0
-    # 2nd task
-    train_iter2 = chainer.iterators.SerialIterator(train1, args.batchsize)
-    test_iter2 = chainer.iterators.SerialIterator(test1, args.batchsize, repeat=False, shuffle=False)
+    model.lam = 15.0
+    train2 = permute_mnist(train1)
+    test2 = permute_mnist(test1)
+    train_iter2 = chainer.iterators.SerialIterator(train2, args.batchsize)
+    test_iter2 = chainer.iterators.SerialIterator(test2, args.batchsize, repeat=False, shuffle=False)
     updater2 = training.StandardUpdater(train_iter2, opt, device=args.gpu)
     trainer2 = training.Trainer(updater2, (args.epoch, 'epoch'), out=args.out)
-    trainer2.extend(extensions.Evaluator(test_iter2, model, device=args.gpu))
+    # trainer2.extend(extensions.Evaluator(test_iter2, model, device=args.gpu))
+    trainer2.extend(util.Multi_Evaluator({'task1':test_iter1,'task2':test_iter2}, model, device=args.gpu))
     # Save two plot images to the result dir
     if extensions.PlotReport.available():
         trainer2.extend(
-            extensions.PlotReport(['main/loss', 'validation/main/loss'],
-                                  'epoch', file_name='loss.png'))
-    trainer2.extend(
-        extensions.PlotReport(
-            ['main/accuracy', 'validation/main/accuracy'],
-            'epoch', file_name='accuracy.png'))
+            extensions.PlotReport(['test/task1/loss', 'test/task2/loss'],
+                                  'epoch', file_name='lossB.png'))
+        trainer2.extend(
+            extensions.PlotReport(
+                ['test/task1/accuracy', 'test/task2/accuracy'],
+                'epoch', file_name='accuracyB.png'))
     trainer2.extend(extensions.ProgressBar())
     trainer2.run()
 
