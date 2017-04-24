@@ -41,12 +41,11 @@ class EWC_loss(chainer.Chain):
             chainer.report({'loss': vanilla_loss, 'accuracy': accuracy}, self)
             return vanilla_loss
 
-        fisher = self.get_fisher(x)
         self.ewc_loss = 0.0
         self.regularize_term = 0.0
         for key in self.param_dict:
-            diff_sq = (self.param_dict[key] - self.star_param_dict[key])**2
-            self.regularize_term += F.sum(F.matmul(fisher[key] ,diff_sq,transa=True))
+            diff_sq = (self.param_dict[key] - self.star_param_dict[key].data)**2 # theta_star is not Variable
+            self.regularize_term += F.sum(self.fisher[key] *diff_sq)
         self.ewc_loss = vanilla_loss + self.lam / 2.0 * self.regularize_term
         chainer.report({'loss': self.ewc_loss, 'accuracy': accuracy}, self)
         return self.ewc_loss
@@ -68,7 +67,7 @@ class EWC_loss(chainer.Chain):
         self.star_param_dict = copy.deepcopy(self.param_dict)
 
     def get_fisher(self, x):
-        sampling = 2
+        sampling = 200
         del_param_log_x = []
         for id in range(sampling):
             x_ind = np.random.randint(x.shape[0])
@@ -83,9 +82,9 @@ class EWC_loss(chainer.Chain):
             del_param_log_x.append(del_param_log)
         del_param_log_x = np.array(del_param_log_x)
         # mean
-        fisher = {'W1':0.0, 'b1':0.0, 'W2':0.0, 'b2':0.0}
+        self.fisher = {'W1':0.0, 'b1':0.0, 'W2':0.0, 'b2':0.0}
         for sample_dict in del_param_log_x:
             for key in sample_dict:
-                fisher[key] += sample_dict[key] / float(sampling)
-        return fisher
+                self.fisher[key] += sample_dict[key] / float(sampling)
+
 
