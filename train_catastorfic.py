@@ -22,11 +22,12 @@ def mnist_imshow(img):
     plt.axis('off')
 
 # return a new mnist dataset w/ pixels randomly permuted
-def permute_mnist(tuple_dataset):
-    tuple_dataset2 = deepcopy(tuple_dataset)
-    for data in tuple_dataset2:
-        np.random.shuffle(data[0])
-    return tuple_dataset2
+def permute_mnist(dataset):
+    id2 = np.random.permutation(len(dataset[0]))
+    dataset2 = []
+    for data in dataset:
+        dataset2.append(data[id2])
+    return np.array(dataset2)
 
 def main():
     parser = argparse.ArgumentParser(description='catastorphic forgetting')
@@ -77,14 +78,19 @@ def main():
     # 2nd task
     # calc fisher in task1
     train = np.array(train1)
-    t, x = tuple_data_to_np(train)
-    model.get_fisher(x)
+    test = np.array(test1)
+    t_train, x_train = tuple_data_to_np(train)
+    t_test, x_test = tuple_data_to_np(test)
+    model.get_fisher(x_test)
     model.set_star_weights_dict()
+
     # on EWC
-    model.lam = 15.0
+    model.lam = 100.0
     # set param next task
-    train2 = permute_mnist(train1)
-    test2 = permute_mnist(test1)
+    x_train2 = permute_mnist(x_train)
+    x_test2 = permute_mnist(x_test)
+    t_train2 = t_train
+    t_test2 = t_test
     # train_iter2 = chainer.iterators.SerialIterator(train2, args.batchsize)
     # updater2 = training.StandardUpdater(train_iter2, opt, device=args.gpu)
     # trainer2 = training.Trainer(updater2, (args.epoch, 'epoch'), out=args.out)
@@ -97,13 +103,10 @@ def main():
                 'task2_test_loss':[],
                 'task1_test_acc':[],
                 'task2_test_acc':[],
-                'train_fisher': [],
-                'task1_test_fisher': [],
-                'task2_test_fisher': [],
                 }
-    test_data_lst = {'task1':test1, 'task2':test2}
+    test_data_lst = {'task1':(x_train, t_train), 'task2':(x_train2, t_train2)}
     # Learning loop
-    N = len(train2)
+    N = len(x_train2)
     for epoch in range(args.epoch):
         # training
         # N個の順番をランダムに並び替える
@@ -111,12 +114,10 @@ def main():
         sum_accuracy = 0
         sum_loss = 0
         sum_fisher = 0
-        train = np.array(train2)
-        t, x = tuple_data_to_np(train)
         # 0〜Nまでのデータをバッチサイズごとに使って学習
         for i in range(0, N, args.batchsize):
-            x_batch = x[perm[i:i + args.batchsize]]
-            t_batch = t[perm[i:i + args.batchsize]]
+            x_batch = x_train2[perm[i:i + args.batchsize]]
+            t_batch = t_train2[perm[i:i + args.batchsize]]
 
             # 勾配を初期化
             opt.zero_grads()
@@ -125,11 +126,9 @@ def main():
             # 誤差逆伝播で勾配を計算
             loss.backward()
             opt.update()
-            sum_fisher += model.regularize_term.data*args.batchsize
-            acc = F.accuracy(model.predictor(x), t)
+            acc = F.accuracy(model.predictor(x_batch), t_batch)
             sum_loss += loss.data * args.batchsize
             sum_accuracy += acc.data * args.batchsize
-        plt_dict['train_fisher'].append(sum_fisher)
         plt_dict['train_loss'].append(sum_loss)
         plt_dict['train_acc'].append(sum_accuracy)
 
@@ -137,10 +136,17 @@ def main():
         print('train mean loss={}, accuracy={}'.format(sum_loss / N, sum_accuracy / N))
 
         for key in test_data_lst:
-            test = np.array(test_data_lst[key])
-            t, x = tuple_data_to_np(test)
+            x, t = test_data_lst[key]
             plt_dict['{}_test_loss'.format(key)].append(model(x,t).data)
             plt_dict['{}_test_acc'.format(key)].append(F.accuracy(model.predictor(x), t).data)
+
+    plt.xlabel('epoch')
+    plt.ylabel('validation accuracy')
+    for key in test_data_lst:
+        plt.plot(plt_dict['{}_test_acc'.format(key)], label="{}".format(key))
+    plt.legend(loc='best')
+    plt.savefig('./accuracy.png', transparent=True)
+    plt.close('all')
     print(plt_dict)
 
 
@@ -154,6 +160,14 @@ def tuple_data_to_np(test):
     x = np.array(x, dtype=np.float32)
     t = np.array(y, dtype=np.int32)
     return t, x
+
+def show_img_array(x, tate, yoko):
+    fig, ax = plt.subplots(tate, yoko, figsize=(yoko, tate), dpi=300)
+    for ai, xi in zip(ax.flatten(), x):
+        ai.set_xticklabels([])
+        ai.set_yticklabels([])
+        ai.imshow(xi.reshape(28, 28))
+    plt.show()
 
 
 if __name__ == '__main__':

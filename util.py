@@ -50,7 +50,6 @@ class Multi_Evaluator(extensions.Evaluator):
                     observation['test/{}/loss'.format(key)] = loss
                     observation['test/{}/accuracy'.format(key)] = accuracy
                 summary.add(observation)
-
-
-
         return summary.compute_mean()
+
+
